@@ -1,0 +1,5 @@
+vendor
+build/chat-
+.vscode
+debug
+*.old

@@ -1,0 +1,42 @@
+# Gopkg.toml example
+#
+# Refer to https://github.com/golang/dep/blob/master/docs/Gopkg.toml.md
+# for detailed Gopkg.toml documentation.
+#
+# required = ["github.com/user/thing/cmd/thing"]
+# ignored = ["github.com/user/project/pkgX", "bitbucket.org/user/project/pkgA/pkgY"]
+#
+ [[override]]
+   name = "github.com/multiformats/go-multiaddr"
+   revision = "123a717755e0559ec8fda308019cd24e0a37bb07"
+
+ [[override]]
+   name = "github.com/multiformats/go-multihash"
+   revision = "265e72146e710ff649c6982e3699d01d4e9a18bb"
+
+[[override]]
+   name = "github.com/libp2p/go-libp2p-loggables"
+   revision = "7a534896f9574b69081fa4e3a192270465719ced"
+
+[[override]]
+   name = "github.com/satori/go.uuid"
+   revision = "36e9d2ebbde5e3f13ab2e25625fd453271d6522e"
+
+# [[constraint]]
+#   name = "github.com/user/project2"
+#   branch = "dev"
+#   source = "github.com/myfork/project2"
+#
+# [[override]]
+#   name = "github.com/x/y"
+#   version = "2.4.0"
+#
+# [prune]
+#   non-go = false
+#   go-tests = true
+#   unused-packages = true
+
+# github.com/multiformats/go-multiaddr
+[prune]
+  go-tests = true
+  unused-packages = true
