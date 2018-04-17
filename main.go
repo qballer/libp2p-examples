@@ -55,6 +55,8 @@ type MessageStore map[string]*Message
 func createNode(r io.Reader, sourcePort *int) (node *Node) {
 	node = new(Node)
 
+	node.ms = make(MessageStore)
+	node.incoming = make(chan *Message)
 	prvKey, pubKey, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, r)
 
 	panicGuard(err)
@@ -62,7 +64,7 @@ func createNode(r io.Reader, sourcePort *int) (node *Node) {
 	node.id, _ = peer.IDFromPublicKey(pubKey)
 	if sourcePort != nil {
 		node.port = sourcePort
-		node.address, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", *node.port))
+		node.address, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", *node.port))
 	}
 
 	node.ps = peerstore.NewPeerstore()
@@ -118,7 +120,8 @@ func createHost(node *Node) *basichost.BasicHost {
 	host := basichost.New(network)
 	host.SetStreamHandler("/chat/1.0.0", handleGossipStream(node))
 
-	fmt.Printf("Run './chat -d /ip4/127.0.0.1/tcp/%d/ipfs/%s' on another console.\n You can replace 127.0.0.1 with public IP as well.\n", *node.port, host.ID().Pretty())
+	fmt.Println("Incomming address:")
+	fmt.Printf("/ip4/127.0.0.1/tcp/%d/ipfs/%s\n", *node.port, host.ID().Pretty())
 	fmt.Printf("\nWaiting for incoming connection\n\n")
 	return host
 }
@@ -134,12 +137,15 @@ func handleGossipStream(node *Node) (handler net.StreamHandler) {
 
 func readData(rw *bufio.ReadWriter, node *Node) {
 	for {
-		decoder := json.NewDecoder(rw)
+		decoder := json.NewDecoder(rw.Reader)
 		message := new(Message)
 		err := decoder.Decode(message)
 		if err != nil {
+			fmt.Println("error!!!!")
+			fmt.Println(err.Error())
 			return
 		}
+		message.writeData("got-mssage", message)
 		node.incoming <- message
 	}
 }
@@ -158,22 +164,31 @@ func writeData(node *Node) {
 			if peer != node.id {
 				remoteRW, _ := node.ps.Get(peer, stream)
 				rw := remoteRW.(*bufio.ReadWriter)
-				// decoder := json.NewDecoder(rw)
-				encodier := json.NewEncoder(rw)
+				encoder := json.NewEncoder(rw.Writer)
 				node.outgoingID++
 
-				message := Message{
-					message: sendData,
-					id:      node.outgoingID,
-					origin:  node.address.String(),
-				}
+				message := new(Message)
+				message.message = sendData
+				message.id = node.outgoingID
+				message.origin = node.address.String()
 
-				node.ms[message.Key()] = &message
-				encodier.Encode(message)
-				rw.Flush()
+				message.writeData("created message", message)
+
+				node.ms[message.Key()] = message
+				err := encoder.Encode(message)
+				panicGuard(err)
+
 			}
 		}
 	}
+
+}
+
+func (m *Message) writeData (pre string, message *Message) {
+	fmt.Println("---------------------")
+	fmt.Printf("*** %s ***\n", pre)
+	fmt.Printf("id:%d\n origin:%s\n message:%s", message.id, message.origin, message.message)
+	fmt.Println("---------------------")
 
 }
 
@@ -208,7 +223,9 @@ func (m *Message) Key() string {
 
 func handleIncoming(node *Node) {
 	for {
+		fmt.Println("listening:!")
 		message := <-node.incoming
+		fmt.Println("got it!")
 		messageKey := message.Key()
 		exist := node.ms[messageKey]
 		if exist == nil {
