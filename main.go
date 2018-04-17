@@ -12,7 +12,6 @@ import (
 	mrand "math/rand"
 	"os"
 
-	"github.com/libp2p/go-libp2p-crypto"
 	"github.com/libp2p/go-libp2p-host"
 	"github.com/libp2p/go-libp2p-net"
 	"github.com/libp2p/go-libp2p-peer"
@@ -20,6 +19,7 @@ import (
 	"github.com/libp2p/go-libp2p-swarm"
 	"github.com/libp2p/go-libp2p/p2p/host/basic"
 	"github.com/multiformats/go-multiaddr"
+	dat "github.com/qballer/libp2p-examples/data"
 )
 
 const stream = "stream"
@@ -29,49 +29,6 @@ func panicGuard(err error) {
 	if err != nil {
 		panic(err)
 	}
-}
-
-// Node .
-type Node struct {
-	address    multiaddr.Multiaddr
-	id         peer.ID
-	ps         peerstore.Peerstore
-	port       *int
-	incoming   chan *Message
-	outgoingID int
-	ms         MessageStore
-}
-
-// Message ..
-type Message struct {
-	Message string
-	ID      int
-	Origin  string
-}
-
-// MessageStore ...
-type MessageStore map[string]*Message
-
-func createNode(r io.Reader, sourcePort *int) (node *Node) {
-	node = new(Node)
-
-	node.ms = make(MessageStore)
-	node.incoming = make(chan *Message)
-	prvKey, pubKey, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, r)
-
-	panicGuard(err)
-
-	node.id, _ = peer.IDFromPublicKey(pubKey)
-	if sourcePort != nil {
-		node.port = sourcePort
-		node.address, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", *node.port))
-	}
-
-	node.ps = peerstore.NewPeerstore()
-	node.ps.AddPrivKey(node.id, prvKey)
-	node.ps.AddPubKey(node.id, pubKey)
-
-	return
 }
 
 func addAddrToPeerstore(h host.Host, addr string) peer.ID {
@@ -92,7 +49,7 @@ func addAddrToPeerstore(h host.Host, addr string) peer.ID {
 	return peerid
 }
 
-func connectToDest(dest *string, host *basichost.BasicHost, node *Node) {
+func connectToDest(dest *string, host *basichost.BasicHost, node *dat.Node) {
 	if *dest == "" {
 		return
 	}
@@ -100,57 +57,56 @@ func connectToDest(dest *string, host *basichost.BasicHost, node *Node) {
 	peerID := addAddrToPeerstore(host, *dest)
 
 	fmt.Println("This node's multiaddress: ")
-	fmt.Printf("%s/ipfs/%s\n", node.address, host.ID().Pretty())
+	fmt.Printf("%s/ipfs/%s\n", node.Address, host.ID().Pretty())
 
 	s, err := host.NewStream(context.Background(), peerID, "/chat/1.0.0")
 
 	panicGuard(err)
 
 	rw := bufio.NewReadWriter(bufio.NewReader(s), bufio.NewWriter(s))
-	node.ps.Put(s.Conn().RemotePeer(), stream, rw)
+	node.PS.Put(s.Conn().RemotePeer(), stream, rw)
 
 	go readData(rw, node)
 }
 
-func createHost(node *Node) *basichost.BasicHost {
+func createHost(node *dat.Node) *basichost.BasicHost {
 
-	network, err := swarm.NewNetwork(context.Background(), []multiaddr.Multiaddr{node.address}, node.id, node.ps, nil)
+	network, err := swarm.NewNetwork(context.Background(), []multiaddr.Multiaddr{node.Address}, node.ID, node.PS, nil)
 	panicGuard(err)
 
 	host := basichost.New(network)
 	host.SetStreamHandler("/chat/1.0.0", handleGossipStream(node))
 
 	fmt.Println("Incomming address:")
-	fmt.Printf("/ip4/127.0.0.1/tcp/%d/ipfs/%s\n", *node.port, host.ID().Pretty())
+	fmt.Printf("/ip4/127.0.0.1/tcp/%d/ipfs/%s\n", *node.Port, host.ID().Pretty())
 	fmt.Printf("\nWaiting for incoming connection\n\n")
 	return host
 }
 
-func handleGossipStream(node *Node) (handler net.StreamHandler) {
+func handleGossipStream(node *dat.Node) (handler net.StreamHandler) {
 	return func(s net.Stream) {
 		log.Println("Got a new stream!")
 		rw := bufio.NewReadWriter(bufio.NewReader(s), bufio.NewWriter(s))
-		node.ps.Put(s.Conn().RemotePeer(), stream, rw)
+		node.PS.Put(s.Conn().RemotePeer(), stream, rw)
 		go readData(rw, node)
 	}
 }
 
-func readData(rw *bufio.ReadWriter, node *Node) {
+func readData(rw *bufio.ReadWriter, node *dat.Node) {
 	for {
 		decoder := json.NewDecoder(rw.Reader)
-		message := new(Message)
+		message := new(dat.Message)
 		err := decoder.Decode(message)
 		if err != nil {
 			fmt.Println("error!!!!")
 			fmt.Println(err.Error())
 			return
 		}
-		// message.writeData("got-mssage", message)
-		node.incoming <- message
+		node.Incoming <- message
 	}
 }
 
-func writeData(node *Node) {
+func writeData(node *dat.Node) {
 	stdReader := bufio.NewReader(os.Stdin)
 
 	for {
@@ -158,15 +114,15 @@ func writeData(node *Node) {
 		sendData, err := stdReader.ReadString('\n')
 
 		panicGuard(err)
-		node.outgoingID++
+		node.OutgoingID++
 
-		msg := createMessage(sendData, node.address.String(), node.outgoingID)
-		sendToPeers(msg, node.ps.Peers(), node)
+		msg := createMessage(sendData, node.Address.String(), node.OutgoingID)
+		sendToPeers(msg, node.PS.Peers(), node)
 	}
 }
 
-func createMessage(data string, address string, id int) (*Message) {
-	message := new(Message)
+func createMessage(data string, address string, id int) *dat.Message {
+	message := new(dat.Message)
 	message.Message = data
 	message.ID = id
 	message.Origin = address
@@ -174,27 +130,19 @@ func createMessage(data string, address string, id int) (*Message) {
 
 }
 
-func sendToPeers(message *Message , peers []peer.ID, node *Node) {
+func sendToPeers(message *dat.Message, peers []peer.ID, node *dat.Node) {
 	for _, peer := range peers {
-		if peer != node.id {
-			remoteRW, _ := node.ps.Get(peer, stream)
+		if peer != node.ID {
+			remoteRW, _ := node.PS.Get(peer, stream)
 			rw := remoteRW.(*bufio.ReadWriter)
 			enc := json.NewEncoder(rw.Writer)
 
-			node.ms[message.Key()] = message
+			node.MS[message.Key()] = message
 			err := enc.Encode(*message)
 			rw.Flush()
 			panicGuard(err)
 		}
 	}
-}
-
-func (m *Message) writeData(pre string, message *Message) {
-	fmt.Println("---------------------")
-	fmt.Printf("*** %s ***\n", pre)
-	fmt.Printf("ID:%d\n Origin:%s\n Message:%s", message.ID, message.Origin, message.Message)
-	fmt.Println("---------------------")
-
 }
 
 func main() {
@@ -211,7 +159,7 @@ func main() {
 		r = rand.Reader
 	}
 
-	node := createNode(r, sourcePort)
+	node := dat.NewNode(r, sourcePort)
 
 	host := createHost(node)
 	connectToDest(dest, host, node)
@@ -221,20 +169,15 @@ func main() {
 	select {}
 }
 
-// Key ..
-func (m *Message) Key() string {
-	return fmt.Sprintf("%s|%d", m.Origin, m.ID)
-}
-
-func handleIncoming(node *Node) {
+func handleIncoming(node *dat.Node) {
 	for {
-		message := <-node.incoming
+		message := <-node.Incoming
 		messageKey := message.Key()
-		exist := node.ms[messageKey]
+		exist := node.MS[messageKey]
 		if exist == nil {
-			node.ms[messageKey] = message
+			node.MS[messageKey] = message
 			fmt.Printf("%s > %s", messageKey, message.Message)
-			sendToPeers(message, node.ps.Peers(), node)
-		} 
+			sendToPeers(message, node.PS.Peers(), node)
+		}
 	}
 }
