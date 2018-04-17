@@ -1,4 +1,4 @@
 ### libp2p-examples
 
-Playing with libp2p examples. Refactoring and checking out ideas in libp2p.
-You might find these examples useful if you want to run libp2p with dep (instead of gx)
+1. Playing with libp2p examples. Refactoring and checking out ideas.
+2. You might find these examples useful if you run libp2p without dep.
