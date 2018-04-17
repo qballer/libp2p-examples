@@ -44,9 +44,9 @@ type Node struct {
 
 // Message ..
 type Message struct {
-	message string
-	id      int
-	origin  string
+	Message string
+	ID      int
+	Origin  string
 }
 
 // MessageStore ...
@@ -145,7 +145,7 @@ func readData(rw *bufio.ReadWriter, node *Node) {
 			fmt.Println(err.Error())
 			return
 		}
-		message.writeData("got-mssage", message)
+		// message.writeData("got-mssage", message)
 		node.incoming <- message
 	}
 }
@@ -158,36 +158,41 @@ func writeData(node *Node) {
 		sendData, err := stdReader.ReadString('\n')
 
 		panicGuard(err)
+		node.outgoingID++
 
-		peers := node.ps.Peers()
-		for _, peer := range peers {
-			if peer != node.id {
-				remoteRW, _ := node.ps.Get(peer, stream)
-				rw := remoteRW.(*bufio.ReadWriter)
-				encoder := json.NewEncoder(rw.Writer)
-				node.outgoingID++
-
-				message := new(Message)
-				message.message = sendData
-				message.id = node.outgoingID
-				message.origin = node.address.String()
-
-				message.writeData("created message", message)
-
-				node.ms[message.Key()] = message
-				err := encoder.Encode(message)
-				panicGuard(err)
-
-			}
-		}
+		msg := createMessage(sendData, node.address.String(), node.outgoingID)
+		sendToPeers(msg, node.ps.Peers(), node)
 	}
+}
+
+func createMessage(data string, address string, id int) (*Message) {
+	message := new(Message)
+	message.Message = data
+	message.ID = id
+	message.Origin = address
+	return message
 
 }
 
-func (m *Message) writeData (pre string, message *Message) {
+func sendToPeers(message *Message , peers []peer.ID, node *Node) {
+	for _, peer := range peers {
+		if peer != node.id {
+			remoteRW, _ := node.ps.Get(peer, stream)
+			rw := remoteRW.(*bufio.ReadWriter)
+			enc := json.NewEncoder(rw.Writer)
+
+			node.ms[message.Key()] = message
+			err := enc.Encode(*message)
+			rw.Flush()
+			panicGuard(err)
+		}
+	}
+}
+
+func (m *Message) writeData(pre string, message *Message) {
 	fmt.Println("---------------------")
 	fmt.Printf("*** %s ***\n", pre)
-	fmt.Printf("id:%d\n origin:%s\n message:%s", message.id, message.origin, message.message)
+	fmt.Printf("ID:%d\n Origin:%s\n Message:%s", message.ID, message.Origin, message.Message)
 	fmt.Println("---------------------")
 
 }
@@ -218,19 +223,18 @@ func main() {
 
 // Key ..
 func (m *Message) Key() string {
-	return fmt.Sprintf("%s|%d", m.origin, m.id)
+	return fmt.Sprintf("%s|%d", m.Origin, m.ID)
 }
 
 func handleIncoming(node *Node) {
 	for {
-		fmt.Println("listening:!")
 		message := <-node.incoming
-		fmt.Println("got it!")
 		messageKey := message.Key()
 		exist := node.ms[messageKey]
 		if exist == nil {
 			node.ms[messageKey] = message
-			fmt.Printf("%s > %s", messageKey, message.message)
-		}
+			fmt.Printf("%s > %s", messageKey, message.Message)
+			sendToPeers(message, node.ps.Peers(), node)
+		} 
 	}
 }
