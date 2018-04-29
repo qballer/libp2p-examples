@@ -1,5 +1,5 @@
 vendor
-build/chat-
+build/chat
 .vscode
 debug
 *.old

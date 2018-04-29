@@ -3,12 +3,28 @@ package data
 import (
 	"fmt"
 	"io"
+	"bufio"
+	"encoding/json"
+	"context"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/libp2p/go-libp2p-peer"
 	"github.com/libp2p/go-libp2p-peerstore"
 	"github.com/libp2p/go-libp2p-crypto"
+	"github.com/libp2p/go-libp2p/p2p/host/basic"
+	"github.com/libp2p/go-libp2p-host"
+	"github.com/libp2p/go-libp2p-swarm"
+	"github.com/libp2p/go-libp2p-net"
+
 
 )
+// Stream .
+const Stream = "stream"
+
+// ID .
+const ID = "ID"
+
+//IncomingCallback .
+type IncomingCallback func(*Node) (net.StreamHandler)
 // Node .
 type Node struct {
 	Address    multiaddr.Multiaddr
@@ -18,6 +34,7 @@ type Node struct {
 	Incoming   chan *Message
 	OutgoingID int
 	MS         Store
+	host *basichost.BasicHost
 }
 
 
@@ -28,7 +45,7 @@ func panicGuard(err error) {
 }
 
 // NewNode ..
-func NewNode(r io.Reader, sourcePort *int) (node *Node) {
+func NewNode(r io.Reader, sourcePort *int, cb func(*Node) (net.StreamHandler)) (node *Node) {
 	node = new(Node)
 
 	node.MS = make(Store)
@@ -46,6 +63,80 @@ func NewNode(r io.Reader, sourcePort *int) (node *Node) {
 	node.PS = peerstore.NewPeerstore()
 	node.PS.AddPrivKey(node.ID, prvKey)
 	node.PS.AddPubKey(node.ID, pubKey)
+	node.host = node.createHost(cb)
 
 	return
+}
+
+
+func (node *Node) createHost(cb IncomingCallback) *basichost.BasicHost {
+
+	network, err := swarm.NewNetwork(context.Background(), []multiaddr.Multiaddr{node.Address}, node.ID, node.PS, nil)
+	panicGuard(err)
+
+	host := basichost.New(network)
+	host.SetStreamHandler("/chat/1.0.0", cb(node))
+	
+	fmt.Println("Incomming address:")
+	fmt.Printf("/ip4/127.0.0.1/tcp/%d/ipfs/%s\n", *node.Port, host.ID().Pretty())
+	fmt.Printf("\nWaiting for incoming connection\n\n")
+	return host
+}
+
+// ConnectToDest .
+func (node *Node) ConnectToDest(dest *string) (*bufio.ReadWriter){
+	if *dest == "" {
+		return nil
+	}
+
+	peerID := addAddrToPeerstore(node.host, *dest) 
+
+	fmt.Println("This node's multiaddress: ")
+	fmt.Printf("%s/ipfs/%s\n", node.Address, node.host.ID().Pretty())
+
+	s, err := node.host.NewStream(context.Background(), peerID, "/chat/1.0.0")
+
+	panicGuard(err)
+
+	rw := bufio.NewReadWriter(bufio.NewReader(s), bufio.NewWriter(s))
+	node.PS.Put(s.Conn().RemotePeer(), Stream, rw)
+
+	
+	return rw
+}
+
+func addAddrToPeerstore(h host.Host, addr string) peer.ID {
+	ipfsaddr, err := multiaddr.NewMultiaddr(addr)
+	panicGuard(err)
+
+	pid, err := ipfsaddr.ValueForProtocol(multiaddr.P_IPFS)
+	panicGuard(err)
+
+	peerid, err := peer.IDB58Decode(pid)
+	panicGuard(err)
+
+	targetPeerAddr, _ := multiaddr.NewMultiaddr(
+		fmt.Sprintf("/ipfs/%s", peer.IDB58Encode(peerid)))
+	targetAddr := ipfsaddr.Decapsulate(targetPeerAddr)
+
+	h.Peerstore().AddAddr(peerid, targetAddr, peerstore.PermanentAddrTTL)
+	return peerid
+}
+
+// --- GO routines
+
+//SendToPeers .
+func (node *Node) SendToPeers(message *Message) {
+	bytes, _ := json.Marshal(*message)
+	node.MS[message.Key()] = message
+	peers := node.PS.Peers()
+	for _, peer := range peers {
+		if peer != node.ID {
+			remoteRW, _ := node.PS.Get(peer, Stream)
+			rw := remoteRW.(*bufio.ReadWriter)
+			_ , err := rw.Write(bytes)
+			rw.Flush()
+			panicGuard(err)
+		}
+	}
 }
